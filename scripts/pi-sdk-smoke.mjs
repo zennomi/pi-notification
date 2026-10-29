@@ -25,7 +25,7 @@ const agentDir = mkdtempSync(resolve(tmpdir(), "pi-sdk-smoke-"));
 const env = { ...process.env, PI_CODING_AGENT_DIR: agentDir };
 const rpcArgs = [piCli, "--offline", "--no-session", "--no-tools", "--no-extensions", "--no-skills",
   "--no-context-files", "--no-prompt-templates", "--no-mcp", "-e", ".", "--mode", "rpc"];
-const templateInput = '{"type":"prompt","message":"?template"}\n';
+const notifyInput = '{"type":"prompt","message":"/notify-test"}\n';
 
 function run(name, executable, args, input) {
   const result = spawnSync(executable, args, {
@@ -46,10 +46,10 @@ function run(name, executable, args, input) {
 
 try {
   const cases = [
-    run("extension_load", process.execPath, rpcArgs, templateInput),
-    run("happy_path", process.execPath, rpcArgs, templateInput),
+    run("extension_load", process.execPath, rpcArgs, notifyInput),
+    run("happy_path", process.execPath, rpcArgs, notifyInput),
     run("error_path", process.execPath, rpcArgs, "not-json\n"),
-    run("reload_cleanup", process.execPath, rpcArgs, templateInput),
+    run("reload_cleanup", process.execPath, rpcArgs, notifyInput),
   ];
   // Fixed/quoted argv tests the real native shell, not Git Bash/cmd assumptions.
   if (process.platform === "win32") {
@@ -61,7 +61,7 @@ try {
     cases.push(run("host_shell", "/bin/sh", ["-c", '"$1" "$2" --no-extensions --version', "pi-host-shell", process.execPath, piCli], ""));
   }
   const report = { schema_version: 1, verification_contract: VERIFICATION_CONTRACT, sdk_versions: sdkVersions,
-    platform: process.platform, model_inference: "none; actual Pi extension-handled RPC input",
+    platform: process.platform, model_inference: "none; actual Pi notify command RPC input",
     unhandled_errors: cases.filter((c) => c.hasUnhandledError).length,
     extension_load_errors: cases.filter((c) => c.hasLoadError || (c.name === "extension_load" && !c.passed)).length,
     cases: cases.map(({ hasUnhandledError, hasLoadError, ...item }) => item) };

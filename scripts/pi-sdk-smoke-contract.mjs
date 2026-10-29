@@ -1,5 +1,5 @@
 // Parser tests complement, never replace, actual Pi execution.
-export const VERIFICATION_CONTRACT = "pi-sdk-behavior-v2";
+export const VERIFICATION_CONTRACT = "pi-sdk-behavior-v3";
 export const SDK_NAMES = ["@earendil-works/pi-agent-core", "@earendil-works/pi-ai",
   "@earendil-works/pi-coding-agent", "@earendil-works/pi-tui"];
 export const UNHANDLED_ERROR_PATTERN = /UnhandledPromiseRejection|uncaught exception|shutdown error/i;
@@ -16,18 +16,28 @@ function assertion(id, expected, observed, passed) {
   return { id, expected, observed: JSON.stringify(observed), passed: passed === true };
 }
 
+function findPrompt(responses) {
+  return responses.find((row) => row?.type === "response" && row.command === "prompt");
+}
+
+function findSetupNotification(responses) {
+  return responses.find((row) => row?.type === "extension_ui_request"
+    && row.method === "notify"
+    && typeof row.message === "string"
+    && row.message.includes("Telegram is not configured"));
+}
+
 export function behaviorAssertions(name, { responses, fullOutput, exit_code, expectedVersion }) {
-  const status = responses.find((row) => row?.type === "extension_ui_request"
-    && row.method === "setStatus" && row.statusKey === "template" && row.statusText === "Pi template loaded");
-  const prompt = responses.find((row) => row?.type === "response" && row.command === "prompt");
-  const notification = responses.find((row) => row?.type === "extension_ui_request" && row.method === "notify"
-    && typeof row.message === "string" && row.message.startsWith("Pi extension template loaded."));
-  const handled = prompt?.success === true && prompt.data?.disposition === "handled" && !!notification;
+  const prompt = findPrompt(responses);
+  const notification = findSetupNotification(responses);
+  const handled = prompt?.success === true && !!notification;
+
   if (name === "extension_load") {
-    return [assertion("extension_registered", "Actual Pi emits the template session-start status", status ?? null, !!status)];
+    return [assertion("extension_loaded", "Pi loads the notify extension and its test command emits a setup hint",
+      notification ?? null, !!notification)];
   }
   if (name === "happy_path") {
-    return [assertion("feature_response", "Template input emits its notification and handled RPC response",
+    return [assertion("feature_response", "The notify test command returns a successful prompt response and setup hint",
       { prompt: prompt ?? null, notification: notification ?? null }, handled)];
   }
   if (name === "error_path") {
@@ -37,8 +47,9 @@ export function behaviorAssertions(name, { responses, fullOutput, exit_code, exp
   }
   if (name === "reload_cleanup") {
     return [
-      assertion("reloaded_extension_registered", "The second isolated Pi host emits template session-start status", status ?? null, !!status),
-      assertion("reloaded_feature_response", "The second host handles template input and emits the real feature notification",
+      assertion("reloaded_extension_loaded", "The second isolated Pi host loads notify and emits the setup hint",
+        notification ?? null, !!notification),
+      assertion("reloaded_feature_response", "The second host runs the notify test command successfully",
         { prompt: prompt ?? null, notification: notification ?? null }, handled),
       assertion("clean_shutdown", "The actual host exits zero without unhandled/shutdown errors",
         { exit_code, errors: UNHANDLED_ERROR_PATTERN.test(fullOutput) }, exit_code === 0 && !UNHANDLED_ERROR_PATTERN.test(fullOutput)),

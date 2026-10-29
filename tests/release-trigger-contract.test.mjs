@@ -10,8 +10,9 @@ test("code merge cannot directly or indirectly trigger release/publication", () 
   assert.doesNotThrow(() => assertReleaseTriggerContract(release, publish));
   assert.match(publish, /if: steps\.published\.outputs\.skip != 'true'/);
   assert.match(release, /gh workflow run publish\.yml/); // explicit handoff is kept for manual release
-  assert.match(release, /require\('\.\/packages\/create-pi-extension\/package\.json'\)\.version/);
-  assert.match(publish, /require\('\.\/packages\/create-pi-extension\/package\.json'\)\.version/);
+  assert.match(release, /require\('\.\/package\.json'\)\.version/);
+  assert.match(publish, /require\('\.\/package\.json'\)\.name/);
+  assert.match(publish, /npm publish --access public/);
 });
 
 test("release version validation rejects leading zeroes in numeric components", () => {

@@ -1,123 +1,97 @@
-# Pi Extension Template
+# pi-notification
 
-[![Join dotfield.xyz on Discord](https://img.shields.io/badge/Join%20dotfield.xyz%20on%20Discord-5865F2?logo=discord&logoColor=white)](https://discord.gg/4945dXZVW5)
+Telegram notifications for [Pi](https://pi.dev): send urgent messages with `notify_user` and receive a concise recap when an agent run finishes.
 
-[![CI](https://github.com/eiei114/pi-extension-template/actions/workflows/ci.yml/badge.svg)](https://github.com/eiei114/pi-extension-template/actions/workflows/ci.yml)
-[![Publish](https://github.com/eiei114/pi-extension-template/actions/workflows/publish.yml/badge.svg)](https://github.com/eiei114/pi-extension-template/actions/workflows/publish.yml)
-[![npm version](https://img.shields.io/npm/v/create-pi-extension.svg)](https://www.npmjs.com/package/create-pi-extension)
-[![npm downloads](https://img.shields.io/npm/dm/create-pi-extension.svg)](https://www.npmjs.com/package/create-pi-extension)
+[![CI](https://github.com/zennomi/pi-notification/actions/workflows/ci.yml/badge.svg)](https://github.com/zennomi/pi-notification/actions/workflows/ci.yml)
+[![npm version](https://img.shields.io/npm/v/pi-notification.svg)](https://www.npmjs.com/package/pi-notification)
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](LICENSE)
-[![Pi package](https://img.shields.io/badge/pi-package-purple.svg)](https://pi.dev/packages)
-[![Trusted Publishing](https://img.shields.io/badge/npm-Trusted%20Publishing-blue.svg)](docs/release.md)
-<a href="https://buymeacoffee.com/ekawano114m"><img src="https://cdn.buymeacoffee.com/buttons/v2/default-yellow.png" alt="Buy Me A Coffee" width="217" height="60"></a>
-
-> Template for building Pi packages with extensions, Agent Skills, prompts, and themes.
-
-## What this is
-
-This repository is the **template source** for new Pi extension OSS projects. The published npm package is [`create-pi-extension`](https://www.npmjs.com/package/create-pi-extension) (the scaffold CLI). The repository root is **not** published to npm.
-
-`create-pi-extension` is live on npm — use `bunx create-pi-extension@latest` to scaffold a new project.
 
 ## Features
 
-- Interactive `create-pi-extension` CLI for scoped and unscoped package names.
-- TypeScript-first examples for extensions, Agent Skills, prompts, themes, tools, and TUI components.
-- GitHub Actions CI, npm Trusted Publishing, security policy, issue templates, and release automation.
-- Canonical public README with standard badges, install paths, quick start, package contents, and security guidance.
-- Canonical scaffold README shared by CLI-first generation and the GitHub Template setup checklist.
+- Telegram Bot API delivery with MarkdownV2 formatting.
+- `notify_user` tool for critical errors, long-running task completion, and requested alerts.
+- One Telegram message after a settled agent run, optionally summarized by the active Pi model.
+- Automatic chat-ID detection during setup.
 
 ## Install
 
-Create a new Pi extension package with the published CLI:
-
 ```bash
-bunx create-pi-extension@latest my-pi-package
+pi install npm:pi-notification
 ```
 
-## Quick start
-
-### Primary path (recommended)
-
-Scaffold a new project with the published CLI:
+For local development:
 
 ```bash
-bunx create-pi-extension@latest my-pi-package
+pi -e .
 ```
 
-The CLI copies the bundled template, replaces placeholders, removes bootstrap docs, and can run `git init` plus `bun install`. See [`docs/template-checklist.md`](docs/template-checklist.md) for the minimal follow-up checklist.
+## Configure Telegram
 
-For a scoped package name:
+1. Open Telegram and message `@BotFather`.
+2. Send `/newbot` and copy the bot token.
+3. In Pi, run:
+
+```text
+/notify-telegram-setup
+```
+
+Paste the token, then send any message to the new bot. The extension polls Telegram for the chat ID and saves the configuration to `~/.pi/agent/notify.json`.
+
+You can send a test message with:
+
+```text
+/notify-test
+```
+
+Environment variables override file values for temporary use:
 
 ```bash
-bunx create-pi-extension@latest @my-scope/my-pi-tool
+TELEGRAM_BOT_TOKEN=123:token TELEGRAM_CHAT_ID=456 pi
 ```
 
-### Secondary path: GitHub Template
+A project-local `.pi/notify.json` can override global settings. Secrets saved by the setup command are always written globally.
 
-Create a repository from this template when you prefer GitHub-first onboarding:
+## Configuration
 
-```bash
-gh repo create OWNER/my-pi-package \
-  --template eiei114/pi-extension-template \
-  --clone
+```json
+{
+  "telegram": {
+    "enabled": true,
+    "botToken": "123:token",
+    "chatId": "456"
+  },
+  "finish": { "enabled": true },
+  "recap": { "enabled": true, "model": "" }
+}
 ```
 
-Then follow the **Secondary path** section in [`docs/template-checklist.md`](docs/template-checklist.md) for manual placeholder replacement, metadata, and post-generation cleanup.
-That checklist first copies `scaffold/package-readme.md` to `README.md`, giving GitHub Template users the same standard badges and README structure as CLI-generated packages.
+An empty `recap.model` uses the current session model. Set it to `provider/model-id` to use another configured Pi model. Disable automatic recaps with:
 
-## Legacy npm package
+```text
+/notify-recap off
+```
 
-Do **not** use `pi install npm:pi-extension-template` as the main onboarding path. That legacy [`pi-extension-template`](https://www.npmjs.com/package/pi-extension-template) npm package predates the scaffold CLI and is not maintained as the onboarding artifact. Use **`create-pi-extension`** to scaffold a new project instead. After you publish your own extension, install it with `pi install npm:YOUR_PACKAGE_NAME` as documented in that project's README.
+## `notify_user`
 
-## Package contents
+The tool accepts `message`, optional `title`, and optional `priority` (`low`, `normal`, or `high`). Low-priority Telegram messages disable notification sound.
 
-| Path | Purpose |
-|---|---|
-| Repository root | Template source (not published to npm) |
-| `packages/create-pi-extension/` | Published scaffold CLI |
-| `scaffold/` | Generated-package README source synced into the bundled template |
-| `docs/` | Maintainer docs and template bootstrap guides |
+```text
+notify_user({
+  title: "Build Failed",
+  message: "TypeScript compilation failed. Check the error output.",
+  priority: "high"
+})
+```
+
+Use it for actionable notifications, not routine status updates or every turn completion.
 
 ## Development
 
 ```bash
-npm install
+npm ci
 npm run ci
 ```
 
-`npm run ci` runs typecheck, `sync:template`, tests, `review:guardrails`, a `create-pi-extension` pack check, and template sync assertions.
+## Credits
 
-See [`CONTRIBUTING.md`](CONTRIBUTING.md) and [`docs/template-sync.md`](docs/template-sync.md).
-
-## Release
-
-Releases publish **`create-pi-extension`** to npm through Trusted Publishing. The root template source is not published.
-
-See [`docs/release.md`](docs/release.md) for setup details.
-
-## Docs
-
-- [`docs/template-checklist.md`](docs/template-checklist.md) — Primary vs Secondary setup flows
-- [`docs/template-sync.md`](docs/template-sync.md) — refresh `packages/create-pi-extension/template/` before CLI publish
-- [`docs/template-sync-checklist.md`](docs/template-sync-checklist.md) — checklist for syncing and verifying the bundled template
-- [`docs/examples.md`](docs/examples.md) — extension, skill, prompt, and theme examples
-- [`docs/release.md`](docs/release.md) — Trusted Publishing and monorepo publish path
-- [`docs/publish-local-validation.md`](docs/publish-local-validation.md) — local checks before merge or publish dispatch
-- [`ROADMAP.md`](ROADMAP.md) — current status, priorities, and the maintenance seed backlog
-
-## Security
-
-Pi packages can execute code with your local permissions. Review extensions before installing third-party packages.
-
-For vulnerability reporting, see [`SECURITY.md`](SECURITY.md).
-
-## Links
-
-- npm (`create-pi-extension`): https://www.npmjs.com/package/create-pi-extension
-- GitHub: https://github.com/eiei114/pi-extension-template
-- Issues: https://github.com/eiei114/pi-extension-template/issues
-
-## License
-
-MIT
+Telegram transport and notification behavior are a focused fork of [`Neuron-Mr-White/UniPi` notify](https://github.com/Neuron-Mr-White/UniPi/tree/main/packages/notify), used under its MIT license.

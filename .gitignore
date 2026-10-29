@@ -19,6 +19,7 @@ coverage/
 !.env.example
 
 # pi local/runtime state
+.unipi/
 .pi/tmp/
 .pi/cache/
 .pi/sessions/
@@ -37,5 +38,3 @@ Thumbs.db
 .tmp/
 tmp/
 
-# generated CLI template bundle
-packages/create-pi-extension/template/
