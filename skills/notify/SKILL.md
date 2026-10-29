@@ -29,7 +29,7 @@ Use `notify_user` to send a message to the user's configured Telegram chat.
 | Parameter | Type | Default | Description |
 |---|---|---|---|
 | `message` | string | required | Notification body |
-| `title` | string? | `Pi Notification` | Notification title |
+| `title` | string? | none | Optional heading shown on the first line of the body; the Telegram title is the current folder name |
 | `priority` | string? | `normal` | `low`, `normal`, or `high`; low disables Telegram sound |
 
 ## Examples
@@ -48,5 +48,7 @@ notify_user({
   message: "The deployment finished and all health checks passed."
 })
 ```
+
+The Telegram title is the current working folder name. Finish notifications include the full last assistant response; a recap is generated only when the message exceeds Telegram's 4096-character limit. If a `notify_user` message is too long, the optional `title` remains the first body line while the body is recapped or truncated to fit.
 
 Configure the Telegram bot with `/notify-telegram-setup` before using the tool.

@@ -1,5 +1,9 @@
 import type { ExtensionContext } from "@earendil-works/pi-coding-agent";
 import type { AssistantMessage, Context, Model } from "@earendil-works/pi-ai";
+import {
+  TELEGRAM_MAX_MESSAGE_CHARS,
+  telegramTextLength,
+} from "./telegram.ts";
 
 const SYSTEM_PROMPT = "Summarize this in one concise sentence for a push notification. Reply with ONLY the summary.";
 const MAX_INPUT_CHARS = 2000;
@@ -70,16 +74,14 @@ function resolveModel(
   return parsed ? ctx.modelRegistry.find(parsed.provider, parsed.modelId) : undefined;
 }
 
-/** Summarize text with Pi's configured model runtime, falling back safely. */
-export async function summarizeLastMessage(
+export async function tryRecap(
   messageText: string,
   ctx: Pick<ExtensionContext, "model" | "modelRegistry">,
   modelRef = "",
   timeoutMs = TIMEOUT_MS,
-): Promise<string> {
-  const fallback = fallbackSummary(messageText);
+): Promise<string | null> {
   const model = resolveModel(ctx, modelRef);
-  if (!model) return fallback;
+  if (!model) return null;
 
   const input = messageText.length > MAX_INPUT_CHARS
     ? `${messageText.slice(0, MAX_INPUT_CHARS)}...`
@@ -105,10 +107,55 @@ export async function summarizeLastMessage(
     });
     const result = await Promise.race([stream.result(), timeoutPromise]);
     const summary = assistantText(result)?.trim();
-    return summary || fallback;
+    return summary || null;
   } catch {
-    return fallback;
+    return null;
   } finally {
     if (timeout) clearTimeout(timeout);
   }
+}
+
+export function truncateToLength(text: string, max: number): string {
+  if (max <= 0) return "";
+  if (text.length <= max) return text;
+  if (max <= 3) return ".".repeat(max);
+  return `${text.slice(0, max - 3)}...`;
+}
+
+export interface FitTelegramBodyOptions {
+  title: string;
+  prefix: string;
+  text: string;
+  ctx?: Pick<ExtensionContext, "model" | "modelRegistry">;
+  recap: { enabled: boolean; model: string };
+  limit?: number;
+}
+
+export async function fitTelegramBody({
+  title,
+  prefix,
+  text,
+  ctx,
+  recap,
+  limit = TELEGRAM_MAX_MESSAGE_CHARS,
+}: FitTelegramBodyOptions): Promise<string> {
+  let body = `${prefix}${text}`;
+  if (telegramTextLength(title, body) <= limit) return body;
+
+  if (recap.enabled && ctx) {
+    const summary = await tryRecap(text, ctx, recap.model);
+    if (summary) body = `${prefix}${summary}`;
+  }
+
+  return truncateToLength(body, Math.max(0, limit - title.length - 1));
+}
+
+/** Summarize text with Pi's configured model runtime, falling back safely. */
+export async function summarizeLastMessage(
+  messageText: string,
+  ctx: Pick<ExtensionContext, "model" | "modelRegistry">,
+  modelRef = "",
+  timeoutMs = TIMEOUT_MS,
+): Promise<string> {
+  return (await tryRecap(messageText, ctx, modelRef, timeoutMs)) ?? fallbackSummary(messageText);
 }

@@ -1,10 +1,11 @@
+import { basename } from "node:path";
 import type { ExtensionContext } from "@earendil-works/pi-coding-agent";
 import type { NotifyConfig } from "./config.ts";
 import { dispatchNotification, type DispatchResult, type NotificationRequest } from "./dispatch.ts";
 import {
   extractLastAssistantText,
   extractLastAssistantTextFromSession,
-  summarizeLastMessage,
+  fitTelegramBody,
 } from "./recap.ts";
 
 export const FINISH_GRACE_MS = 1500;
@@ -24,6 +25,7 @@ function isChildProcess(env: NodeJS.ProcessEnv = process.env): boolean {
 export interface FinishNotifierDeps {
   getConfig: () => NotifyConfig;
   getSessionName?: () => string | undefined;
+  getFolderName?: () => string;
   dispatch?: (request: NotificationRequest, config: NotifyConfig) => Promise<DispatchResult>;
   graceMs?: number;
   env?: NodeJS.ProcessEnv;
@@ -55,15 +57,18 @@ export function createFinishNotifier(
     if (!config.finish.enabled || child) return;
 
     const sessionName = deps.getSessionName?.();
-    const title = "Pi — Agent Complete";
+    const title = deps.getFolderName?.() ?? basename(ctx.cwd || process.cwd());
     let message = sessionName ? `${sessionName} - Agent is complete` : "Agent is complete";
 
-    if (config.recap.enabled) {
-      const text = extractLastAssistantText(payload) ?? extractLastAssistantTextFromSession(ctx);
-      if (text) {
-        const recap = await summarizeLastMessage(text, ctx, config.recap.model);
-        message = sessionName ? `${sessionName}: ${recap}` : recap;
-      }
+    const text = extractLastAssistantText(payload) ?? extractLastAssistantTextFromSession(ctx);
+    if (text) {
+      message = await fitTelegramBody({
+        title,
+        prefix: sessionName ? `${sessionName}: ` : "",
+        text,
+        ctx,
+        recap: config.recap,
+      });
     }
 
     await dispatch({ title, message, priority: "low" }, config);

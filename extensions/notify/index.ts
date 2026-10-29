@@ -1,3 +1,4 @@
+import { basename } from "node:path";
 import type { ExtensionAPI, ExtensionContext } from "@earendil-works/pi-coding-agent";
 import { StringEnum } from "@earendil-works/pi-ai";
 import { Type } from "typebox";
@@ -9,11 +10,14 @@ import {
 } from "../../lib/notify/config.ts";
 import { dispatchNotification, SETUP_HINT } from "../../lib/notify/dispatch.ts";
 import { createFinishNotifier, type FinishNotifier } from "../../lib/notify/finish.ts";
+import { fitTelegramBody } from "../../lib/notify/recap.ts";
 import { pollForChatId } from "../../lib/notify/telegram.ts";
 
 const NotifyUserSchema = Type.Object({
   message: Type.String({ description: "Notification message body" }),
-  title: Type.Optional(Type.String({ description: "Notification title (default: Pi Notification)" })),
+  title: Type.Optional(Type.String({
+    description: "Optional heading shown on the first line of the message (Telegram title is the current folder name)",
+  })),
   priority: Type.Optional(StringEnum(["low", "normal", "high"] as const, {
     description: "Priority level",
   })),
@@ -58,11 +62,19 @@ export default function (pi: ExtensionAPI): void {
         return textResult(SETUP_HINT, { configured: false });
       }
 
-      void dispatchNotification({
-        title: title || "Pi Notification",
-        message,
+      const folderTitle = basename(sessionContext?.cwd ?? process.cwd());
+      const bodyText = title ? `${title}\n${message}` : message;
+      void fitTelegramBody({
+        title: folderTitle,
+        prefix: "",
+        text: bodyText,
+        ctx: sessionContext,
+        recap: config.recap,
+      }).then((body) => dispatchNotification({
+        title: folderTitle,
+        message: body,
         priority,
-      }, config).catch(() => {
+      }, config)).catch(() => {
         // Dispatch is deliberately non-blocking for the agent tool.
       });
       return textResult("Notification sending to telegram", {

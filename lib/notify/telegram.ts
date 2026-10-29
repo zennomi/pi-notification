@@ -2,6 +2,12 @@
 
 import type { NotifyPriority } from "./config.ts";
 
+export const TELEGRAM_MAX_MESSAGE_CHARS = 4096;
+
+export function telegramTextLength(title: string, body: string): number {
+  return title.length + 1 + body.length;
+}
+
 export async function sendTelegramMessage(
   botToken: string,
   chatId: string,

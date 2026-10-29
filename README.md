@@ -10,7 +10,8 @@ Telegram notifications for [Pi](https://pi.dev): send urgent messages with `noti
 
 - Telegram Bot API delivery with MarkdownV2 formatting.
 - `notify_user` tool for critical errors, long-running task completion, and requested alerts.
-- One Telegram message after a settled agent run, optionally summarized by the active Pi model.
+- One Telegram message after a settled agent run, with the full assistant response when it fits Telegram's limit.
+- Automatic recap only when a message exceeds Telegram's 4096-character limit.
 - Automatic chat-ID detection during setup.
 
 ## Install
@@ -51,6 +52,12 @@ TELEGRAM_BOT_TOKEN=123:token TELEGRAM_CHAT_ID=456 pi
 
 A project-local `.pi/notify.json` can override global settings. Secrets saved by the setup command are always written globally.
 
+## Telegram message format
+
+Finish notifications and `notify_user` messages use the current working folder name as the Telegram title. Finish notification bodies contain the session name (when available) followed by the full last assistant message. For `notify_user`, an optional `title` is included as the first line of the body; the Telegram title remains the folder name.
+
+Recaps are generated only when the title and body would exceed Telegram's 4096-character message limit. If recapping is disabled, fails, or is still too long, the body is truncated to fit the limit. `/notify-test` and the setup confirmation keep their explicit titles.
+
 ## Configuration
 
 ```json
@@ -73,7 +80,7 @@ An empty `recap.model` uses the current session model. Set it to `provider/model
 
 ## `notify_user`
 
-The tool accepts `message`, optional `title`, and optional `priority` (`low`, `normal`, or `high`). Low-priority Telegram messages disable notification sound.
+The tool accepts `message`, optional body heading `title`, and optional `priority` (`low`, `normal`, or `high`). The Telegram title is always the current folder name; a supplied `title` is placed on the first line of the body. Low-priority Telegram messages disable notification sound.
 
 ```text
 notify_user({
