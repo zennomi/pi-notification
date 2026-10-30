@@ -16,21 +16,37 @@ test("escapes Telegram MarkdownV2 punctuation", () => {
   assert.equal(escapeMarkdownV2("a_b *c* [d] (e) !"), "a\\_b \\*c\\* \\[d\\] \\(e\\) \\!");
 });
 
-test("sendTelegramMessage sends formatted JSON and quiet low-priority messages", async () => {
+test("sendTelegramMessage sends HTML and quiet low-priority messages", async () => {
   let request;
   globalThis.fetch = async (url, options) => {
     request = { url, options };
     return new Response("{}", { status: 200 });
   };
 
-  await sendTelegramMessage("token", "123", "Build done", "A_b", "low");
+  await sendTelegramMessage("token", "123", "Build <done>", "**A_b**", "low");
   assert.equal(request.url, "https://api.telegram.org/bottoken/sendMessage");
   assert.deepEqual(JSON.parse(request.options.body), {
     chat_id: "123",
-    text: "*Build done*\nA\\_b",
-    parse_mode: "MarkdownV2",
+    text: "<b>Build &lt;done&gt;</b>\n<b>A_b</b>",
+    parse_mode: "HTML",
+    link_preview_options: { is_disabled: true },
     disable_notification: true,
   });
+});
+
+test("sendTelegramMessage retries as plain text when Telegram rejects HTML entities", async () => {
+  const requests = [];
+  globalThis.fetch = async (_url, options) => {
+    requests.push(JSON.parse(options.body));
+    return requests.length === 1
+      ? new Response(JSON.stringify({ ok: false, description: "Bad Request: can't parse entities" }), { status: 400 })
+      : new Response("{}", { status: 200 });
+  };
+
+  await sendTelegramMessage("token", "123", "Title", "**A**");
+  assert.equal(requests.length, 2);
+  assert.equal(requests[1].text, "Title\n**A**");
+  assert.equal(requests[1].parse_mode, undefined);
 });
 
 test("Telegram API errors include status/body but not the bot token", async () => {

@@ -9,7 +9,14 @@ import {
   type NotifyPriority,
 } from "../../lib/notify/config.ts";
 import { dispatchNotification, SETUP_HINT } from "../../lib/notify/dispatch.ts";
+import { notifyCompactionFailed } from "../../lib/notify/errors.ts";
 import { createFinishNotifier, type FinishNotifier } from "../../lib/notify/finish.ts";
+import {
+  ASK_USER_BLOCKED_CHANNEL,
+  ASK_USER_PROMPT_CHANNEL,
+  createInputNotifier,
+  type InputNotifier,
+} from "../../lib/notify/input.ts";
 import { fitTelegramBody } from "../../lib/notify/recap.ts";
 import { pollForChatId } from "../../lib/notify/telegram.ts";
 
@@ -28,6 +35,13 @@ const POLL_TIMEOUT_MS = 5 * 60 * 1000;
 
 let sessionContext: ExtensionContext | undefined;
 let finishNotifier: FinishNotifier | undefined;
+let inputNotifier: InputNotifier | undefined;
+let eventUnsubscribers: Array<() => void> = [];
+
+function disposeEventSubscriptions(): void {
+  for (const unsubscribe of eventUnsubscribers) unsubscribe();
+  eventUnsubscribers = [];
+}
 
 function textResult(text: string, details: Record<string, unknown> = {}) {
   return { content: [{ type: "text" as const, text }], details };
@@ -128,6 +142,21 @@ export default function (pi: ExtensionAPI): void {
     },
   });
 
+  pi.registerCommand("notify-events", {
+    description: "Enable or disable event notifications: error|input on|off",
+    handler: async (args, ctx) => {
+      if (!ctx.hasUI) return;
+      const [kind, value, extra] = args.trim().toLowerCase().split(/\s+/);
+      if ((kind !== "error" && kind !== "input") || (value !== "on" && value !== "off") || extra) {
+        ctx.ui.notify("Usage: /notify-events <error|input> <on|off>", "warning");
+        return;
+      }
+      if (kind === "error") saveGlobalConfig({ error: { enabled: value === "on" } });
+      else saveGlobalConfig({ input: { enabled: value === "on" } });
+      ctx.ui.notify(`${kind} notifications are now ${value}.`, "info");
+    },
+  });
+
   pi.registerCommand("notify-recap", {
     description: "Enable or disable recap messages after agent runs: on|off",
     handler: async (args, ctx) => {
@@ -145,23 +174,55 @@ export default function (pi: ExtensionAPI): void {
   pi.on("session_start", async (_event, ctx) => {
     sessionContext = ctx;
     finishNotifier?.dispose();
+    inputNotifier?.dispose();
+    disposeEventSubscriptions();
     finishNotifier = createFinishNotifier(ctx, {
       getConfig: loadConfig,
       getSessionName: () => pi.getSessionName?.(),
     });
+    inputNotifier = createInputNotifier(ctx, {
+      getConfig: loadConfig,
+      getSessionName: () => pi.getSessionName?.(),
+    });
+    eventUnsubscribers = [
+      pi.events.on(ASK_USER_PROMPT_CHANNEL, (payload) => inputNotifier?.onAskUserPrompt(payload)),
+      pi.events.on(ASK_USER_BLOCKED_CHANNEL, (payload) => inputNotifier?.onAskUserBlocked(payload)),
+    ];
   });
 
   pi.on("agent_start", async () => {
     finishNotifier?.onAgentStart();
+    inputNotifier?.onAgentStart();
+  });
+
+  pi.on("agent_before_settle", async (event) => {
+    finishNotifier?.onBeforeSettle(event);
+  });
+
+  pi.on("ui_prompt_start", async (event) => {
+    inputNotifier?.onUiPromptStart(event);
+  });
+
+  pi.on("session_compact_failed", async (event, ctx) => {
+    await notifyCompactionFailed(event, {
+      getConfig: loadConfig,
+      title: basename(ctx.cwd || process.cwd()),
+      getSessionName: () => pi.getSessionName?.(),
+      ctx,
+    });
   });
 
   pi.on("agent_settled", async (event) => {
+    inputNotifier?.onAgentSettled();
     finishNotifier?.onAgentSettled(event);
   });
 
   pi.on("session_shutdown", async () => {
+    disposeEventSubscriptions();
     finishNotifier?.dispose();
+    inputNotifier?.dispose();
     finishNotifier = undefined;
+    inputNotifier = undefined;
     sessionContext = undefined;
   });
 }

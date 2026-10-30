@@ -12,6 +12,8 @@ export interface NotifyConfig {
   telegram: TelegramConfig;
   finish: { enabled: boolean };
   recap: { enabled: boolean; model: string };
+  error: { enabled: boolean };
+  input: { enabled: boolean };
 }
 
 export type NotifyPriority = "low" | "normal" | "high";
@@ -20,12 +22,16 @@ export interface NotifyConfigPatch {
   telegram?: Partial<TelegramConfig>;
   finish?: Partial<NotifyConfig["finish"]>;
   recap?: Partial<NotifyConfig["recap"]>;
+  error?: Partial<NotifyConfig["error"]>;
+  input?: Partial<NotifyConfig["input"]>;
 }
 
 export const DEFAULT_CONFIG: NotifyConfig = {
   telegram: { enabled: false },
   finish: { enabled: true },
   recap: { enabled: true, model: "" },
+  error: { enabled: true },
+  input: { enabled: true },
 };
 
 export function globalConfigPath(agentDir = getAgentDir()): string {
@@ -54,6 +60,8 @@ function mergeConfig(...parts: NotifyConfigPatch[]): NotifyConfig {
   const telegram: TelegramConfig = { ...DEFAULT_CONFIG.telegram };
   const finish = { ...DEFAULT_CONFIG.finish };
   const recap = { ...DEFAULT_CONFIG.recap };
+  const error = { ...DEFAULT_CONFIG.error };
+  const input = { ...DEFAULT_CONFIG.input };
 
   for (const part of parts) {
     if (isRecord(part.telegram)) {
@@ -68,9 +76,15 @@ function mergeConfig(...parts: NotifyConfigPatch[]): NotifyConfig {
       if (typeof part.recap.enabled === "boolean") recap.enabled = part.recap.enabled;
       if (typeof part.recap.model === "string") recap.model = part.recap.model;
     }
+    if (isRecord(part.error) && typeof part.error.enabled === "boolean") {
+      error.enabled = part.error.enabled;
+    }
+    if (isRecord(part.input) && typeof part.input.enabled === "boolean") {
+      input.enabled = part.input.enabled;
+    }
   }
 
-  return { telegram, finish, recap };
+  return { telegram, finish, recap, error, input };
 }
 
 /** Load defaults, global config, project config, then environment overrides. */

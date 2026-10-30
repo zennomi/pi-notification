@@ -5,6 +5,7 @@ import { dispatchNotification, type DispatchResult, type NotificationRequest } f
 import {
   extractLastAssistantText,
   extractLastAssistantTextFromSession,
+  findLastAssistantMessage,
   fitTelegramBody,
 } from "./recap.ts";
 
@@ -15,7 +16,7 @@ function configuredGraceMs(): number {
   return Number.isFinite(value) && value >= 0 ? value : FINISH_GRACE_MS;
 }
 
-function isChildProcess(env: NodeJS.ProcessEnv = process.env): boolean {
+export function isChildProcess(env: NodeJS.ProcessEnv = process.env): boolean {
   return env.UNIPI_SUBAGENT_CHILD === "1"
     || env.UNIPI_FUSION_CHILD === "1"
     || env.PI_SUBAGENT_CHILD === "1"
@@ -33,6 +34,7 @@ export interface FinishNotifierDeps {
 
 export interface FinishNotifier {
   onAgentStart(): void;
+  onBeforeSettle(payload: { outcome?: string }): void;
   onAgentSettled(payload?: unknown): void;
   dispose(): void;
 }
@@ -43,6 +45,7 @@ export function createFinishNotifier(
   deps: FinishNotifierDeps,
 ): FinishNotifier {
   let timer: ReturnType<typeof setTimeout> | undefined;
+  let outcome: string | undefined;
   const dispatch = deps.dispatch ?? dispatchNotification;
   const graceMs = deps.graceMs ?? configuredGraceMs();
   const child = isChildProcess(deps.env);
@@ -54,10 +57,35 @@ export function createFinishNotifier(
 
   const notify = async (payload: unknown): Promise<void> => {
     const config = deps.getConfig();
-    if (!config.finish.enabled || child) return;
+    if (child) return;
 
     const sessionName = deps.getSessionName?.();
     const title = deps.getFolderName?.() ?? basename(ctx.cwd || process.cwd());
+    const assistant = findLastAssistantMessage(ctx);
+    const isError = outcome === "error" || assistant?.stopReason === "error";
+    const errorEnabled = config.error?.enabled !== false;
+
+    if (isError) {
+      if (!errorEnabled) return;
+      const errorText = assistant?.errorMessage || "The agent run ended with an error.";
+      const partialText = assistant ? extractLastAssistantTextFromSession(ctx) : null;
+      const errorBody = [
+        `**❌ Error**${sessionName ? ` — ${sessionName}` : ""}`,
+        "```\n" + errorText.replaceAll("```", "``\u200b`") + "\n```",
+        partialText,
+      ].filter((part): part is string => Boolean(part)).join("\n\n");
+      const message = await fitTelegramBody({
+        title,
+        prefix: "",
+        text: errorBody,
+        ctx,
+        recap: config.recap,
+      });
+      await dispatch({ title, message, priority: "high" }, config);
+      return;
+    }
+
+    if (!config.finish.enabled) return;
     let message = sessionName ? `${sessionName} - Agent is complete` : "Agent is complete";
 
     const text = extractLastAssistantText(payload) ?? extractLastAssistantTextFromSession(ctx);
@@ -77,10 +105,17 @@ export function createFinishNotifier(
   return {
     onAgentStart() {
       cancel();
+      outcome = undefined;
+    },
+    onBeforeSettle(payload) {
+      outcome = payload.outcome;
     },
     onAgentSettled(payload) {
       cancel();
-      if (!deps.getConfig().finish.enabled || child) return;
+      const config = deps.getConfig();
+      const assistant = findLastAssistantMessage(ctx);
+      const isError = outcome === "error" || assistant?.stopReason === "error";
+      if ((!config.finish.enabled && !(isError && config.error?.enabled !== false)) || child) return;
       timer = setTimeout(() => {
         timer = undefined;
         void notify(payload).catch(() => {

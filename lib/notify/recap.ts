@@ -24,7 +24,14 @@ export function parseModelRef(modelRef: string): { provider: string; modelId: st
   return { provider: modelRef.slice(0, slash), modelId: modelRef.slice(slash + 1) };
 }
 
-function extractAssistantContent(message: { role?: string; content?: unknown }): string | null {
+export interface AssistantMessageLike {
+  role?: string;
+  content?: unknown;
+  stopReason?: string;
+  errorMessage?: string;
+}
+
+export function extractAssistantContent(message: AssistantMessageLike): string | null {
   if (message.role !== "assistant") return null;
   if (typeof message.content === "string") return message.content;
   if (Array.isArray(message.content)) {
@@ -50,15 +57,20 @@ export function extractLastAssistantText(value: unknown): string | null {
   return null;
 }
 
-export function extractLastAssistantTextFromSession(ctx: Pick<ExtensionContext, "sessionManager">): string | null {
+export function findLastAssistantMessage(
+  ctx: Pick<ExtensionContext, "sessionManager">,
+): AssistantMessageLike | null {
   const entries = ctx.sessionManager.getEntries();
   for (let i = entries.length - 1; i >= 0; i -= 1) {
-    const entry = entries[i] as { type?: string; message?: { role?: string; content?: unknown } };
-    if (entry.type !== "message" || !entry.message) continue;
-    const text = extractAssistantContent(entry.message);
-    if (text) return text;
+    const entry = entries[i] as { type?: string; message?: AssistantMessageLike };
+    if (entry.type === "message" && entry.message?.role === "assistant") return entry.message;
   }
   return null;
+}
+
+export function extractLastAssistantTextFromSession(ctx: Pick<ExtensionContext, "sessionManager">): string | null {
+  const message = findLastAssistantMessage(ctx);
+  return message ? extractAssistantContent(message) : null;
 }
 
 function assistantText(result: AssistantMessage): string | null {

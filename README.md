@@ -1,6 +1,6 @@
 # pi-notification
 
-Telegram notifications for [Pi](https://pi.dev): send urgent messages with `notify_user` and receive a concise recap when an agent run finishes.
+Telegram notifications for [Pi](https://pi.dev): send urgent messages with `notify_user`, receive alerts for errors and prompts waiting for user input, and get a concise recap when an agent run finishes.
 
 [![CI](https://github.com/zennomi/pi-notification/actions/workflows/ci.yml/badge.svg)](https://github.com/zennomi/pi-notification/actions/workflows/ci.yml)
 [![npm version](https://img.shields.io/npm/v/pi-notification.svg)](https://www.npmjs.com/package/pi-notification)
@@ -8,8 +8,10 @@ Telegram notifications for [Pi](https://pi.dev): send urgent messages with `noti
 
 ## Features
 
-- Telegram Bot API delivery with MarkdownV2 formatting.
+- Telegram Bot API delivery with Markdown rendered as Telegram HTML.
 - `notify_user` tool for critical errors, long-running task completion, and requested alerts.
+- High-priority alerts for final agent errors and failed context compactions.
+- Alerts when a running agent needs user input, including rich `ask_user_question` prompts.
 - One Telegram message after a settled agent run, with the full assistant response when it fits Telegram's limit.
 - Automatic recap only when a message exceeds Telegram's 4096-character limit.
 - Automatic chat-ID detection during setup.
@@ -68,7 +70,9 @@ Recaps are generated only when the title and body would exceed Telegram's 4096-c
     "chatId": "456"
   },
   "finish": { "enabled": true },
-  "recap": { "enabled": true, "model": "" }
+  "recap": { "enabled": true, "model": "" },
+  "error": { "enabled": true },
+  "input": { "enabled": true }
 }
 ```
 
@@ -77,6 +81,15 @@ An empty `recap.model` uses the current session model. Set it to `provider/model
 ```text
 /notify-recap off
 ```
+
+Toggle error or user-input alerts with:
+
+```text
+/notify-events error off
+/notify-events input off
+```
+
+Notification bodies accept Markdown (`**bold**`, lists, code blocks, and links); it is converted to Telegram's supported HTML format.
 
 ## `notify_user`
 

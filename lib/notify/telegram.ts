@@ -1,6 +1,7 @@
 /** Telegram Bot API transport used by the notification extension. */
 
 import type { NotifyPriority } from "./config.ts";
+import { escapeHtml, markdownToTelegramHtml } from "./markdown.ts";
 
 export const TELEGRAM_MAX_MESSAGE_CHARS = 4096;
 
@@ -15,22 +16,33 @@ export async function sendTelegramMessage(
   message: string,
   priority: NotifyPriority = "normal",
 ): Promise<void> {
-  const text = `*${escapeMarkdownV2(title)}*\n${escapeMarkdownV2(message)}`;
-  const response = await fetch(`https://api.telegram.org/bot${botToken}/sendMessage`, {
+  const url = `https://api.telegram.org/bot${botToken}/sendMessage`;
+  const common = {
+    chat_id: chatId,
+    ...(priority === "low" ? { disable_notification: true } : {}),
+    link_preview_options: { is_disabled: true },
+  };
+  const send = (text: string, parseMode?: "HTML") => fetch(url, {
     method: "POST",
     headers: { "Content-Type": "application/json" },
     body: JSON.stringify({
-      chat_id: chatId,
+      ...common,
       text,
-      parse_mode: "MarkdownV2",
-      ...(priority === "low" ? { disable_notification: true } : {}),
+      ...(parseMode ? { parse_mode: parseMode } : {}),
     }),
   });
 
-  if (!response.ok) {
-    const body = await response.text().catch(() => "<no body>");
-    throw new Error(`Telegram API error ${response.status}: ${body}`);
+  const response = await send(`<b>${escapeHtml(title)}</b>\n${markdownToTelegramHtml(message)}`, "HTML");
+  if (response.ok) return;
+
+  const body = await response.text().catch(() => "<no body>");
+  if (response.status === 400 && /can't parse entities/i.test(body)) {
+    const fallback = await send(`${title}\n${message}`);
+    if (fallback.ok) return;
+    const fallbackBody = await fallback.text().catch(() => "<no body>");
+    throw new Error(`Telegram API error ${fallback.status}: ${fallbackBody}`);
   }
+  throw new Error(`Telegram API error ${response.status}: ${body}`);
 }
 
 export async function pollForChatId(

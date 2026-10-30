@@ -27,11 +27,13 @@ function withAgentDir(agentDir, fn) {
   }
 }
 
-test("config defaults are disabled for Telegram and enabled for finish/recap", () => {
+test("config defaults are disabled for Telegram and enabled for notifications", () => {
   assert.deepEqual(DEFAULT_CONFIG, {
     telegram: { enabled: false },
     finish: { enabled: true },
     recap: { enabled: true, model: "" },
+    error: { enabled: true },
+    input: { enabled: true },
   });
   assert.equal(isTelegramConfigured(DEFAULT_CONFIG), false);
 });
@@ -57,7 +59,16 @@ test("config merges global, project, and environment overrides", () => {
   assert.deepEqual(config.telegram, { enabled: true, botToken: "env-token", chatId: "env-chat" });
   assert.equal(config.finish.enabled, false);
   assert.equal(config.recap.model, "global/model");
+  assert.equal(config.error.enabled, true);
+  assert.equal(config.input.enabled, true);
   assert.equal(isTelegramConfigured(config), true);
+});
+
+test("config patches can disable error and input notifications", () => {
+  const agentDir = tempDir();
+  const saved = saveGlobalConfig({ error: { enabled: false }, input: { enabled: false } }, agentDir);
+  assert.equal(saved.error.enabled, false);
+  assert.equal(saved.input.enabled, false);
 });
 
 test("saveGlobalConfig writes only the global file", () => {

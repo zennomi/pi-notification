@@ -6,9 +6,11 @@ const config = (overrides = {}) => ({
   telegram: { enabled: true, botToken: "token", chatId: "chat" },
   finish: { enabled: true, ...overrides.finish },
   recap: { enabled: false, model: "", ...overrides.recap },
+  error: { enabled: true, ...overrides.error },
+  input: { enabled: true },
 });
 
-function context(summary, lastAnswer = "last answer") {
+function context(summary, lastAnswer = "last answer", messageExtras = {}) {
   const calls = { stream: 0 };
   const ctx = {
     cwd: "/tmp/pi-notification",
@@ -23,7 +25,7 @@ function context(summary, lastAnswer = "last answer") {
     sessionManager: {
       getEntries: () => lastAnswer === null
         ? []
-        : [{ type: "message", message: { role: "assistant", content: lastAnswer } }],
+        : [{ type: "message", message: { role: "assistant", content: lastAnswer, ...messageExtras } }],
     },
   };
   return Object.assign(ctx, { calls });
@@ -31,8 +33,8 @@ function context(summary, lastAnswer = "last answer") {
 
 const wait = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
 
-function notifierContext(summary, lastAnswer = "last answer") {
-  return context(summary, lastAnswer);
+function notifierContext(summary, lastAnswer = "last answer", messageExtras = {}) {
+  return context(summary, lastAnswer, messageExtras);
 }
 
 test("finish notification waits for grace and sends once with full lifecycle text", async () => {
@@ -55,6 +57,42 @@ test("finish notification waits for grace and sends once with full lifecycle tex
   }]);
   assert.equal(ctx.calls.stream, 0);
   notifier.dispose();
+});
+
+test("final agent errors replace completion with a high-priority error notification", async () => {
+  const sent = [];
+  const notifier = createFinishNotifier(notifierContext("ignored", "partial"), {
+    getConfig: () => config({ finish: { enabled: false } }),
+    getSessionName: () => "Demo",
+    getFolderName: () => "pi-notification",
+    graceMs: 1,
+    dispatch: async (request) => { sent.push(request); return { configured: true, sent: true }; },
+  });
+  notifier.onBeforeSettle({ outcome: "error" });
+  notifier.onAgentSettled();
+  await wait(15);
+  assert.deepEqual(sent, [{
+    title: "pi-notification",
+    message: "**❌ Error** — Demo\n\n```\nThe agent run ended with an error.\n```\n\npartial",
+    priority: "high",
+  }]);
+});
+
+test("assistant stopReason and errorMessage are used for final errors", async () => {
+  const sent = [];
+  const notifier = createFinishNotifier(notifierContext("ignored", "partial", {
+    stopReason: "error",
+    errorMessage: "Provider failed",
+  }), {
+    getConfig: () => config(),
+    graceMs: 1,
+    dispatch: async (request) => { sent.push(request); return { configured: true, sent: true }; },
+  });
+  notifier.onAgentSettled();
+  await wait(15);
+  assert.equal(sent[0].priority, "high");
+  assert.match(sent[0].message, /Provider failed/);
+  assert.doesNotMatch(sent[0].message, /Agent is complete/);
 });
 
 test("agent_start cancels a pending completion notification", async () => {
