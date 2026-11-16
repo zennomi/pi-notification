@@ -36,6 +36,7 @@ export interface FinishNotifier {
   onAgentStart(): void;
   onBeforeSettle(payload: { outcome?: string }): void;
   onAgentSettled(payload?: unknown): void;
+  skipCurrentRun(): void;
   dispose(): void;
 }
 
@@ -46,6 +47,7 @@ export function createFinishNotifier(
 ): FinishNotifier {
   let timer: ReturnType<typeof setTimeout> | undefined;
   let outcome: string | undefined;
+  let skipCompletion = false;
   const dispatch = deps.dispatch ?? dispatchNotification;
   const graceMs = deps.graceMs ?? configuredGraceMs();
   const child = isChildProcess(deps.env);
@@ -85,7 +87,7 @@ export function createFinishNotifier(
       return;
     }
 
-    if (!config.finish.enabled) return;
+    if (!config.finish.enabled || skipCompletion) return;
     let message = sessionName ? `${sessionName} - Agent is complete` : "Agent is complete";
 
     const text = extractLastAssistantText(payload) ?? extractLastAssistantTextFromSession(ctx);
@@ -99,6 +101,7 @@ export function createFinishNotifier(
       });
     }
 
+    if (skipCompletion) return;
     await dispatch({ title, message, priority: "low" }, config);
   };
 
@@ -106,6 +109,10 @@ export function createFinishNotifier(
     onAgentStart() {
       cancel();
       outcome = undefined;
+      skipCompletion = false;
+    },
+    skipCurrentRun() {
+      skipCompletion = true;
     },
     onBeforeSettle(payload) {
       outcome = payload.outcome;
@@ -116,6 +123,7 @@ export function createFinishNotifier(
       const assistant = findLastAssistantMessage(ctx);
       const isError = outcome === "error" || assistant?.stopReason === "error";
       if ((!config.finish.enabled && !(isError && config.error?.enabled !== false)) || child) return;
+      if (skipCompletion && !isError) return;
       timer = setTimeout(() => {
         timer = undefined;
         void notify(payload).catch(() => {

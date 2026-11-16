@@ -4,6 +4,9 @@ All notable changes to this project will be documented in this file.
 
 ## [Unreleased]
 
+- Notify on Plannotator plan submissions/revisions and approvals using the existing input toggle.
+- Suppress duplicate finish messages after plan-ready alerts while preserving error notifications.
+
 - Render Markdown notification bodies as Telegram HTML, with a plain-text fallback for rejected entities.
 - Notify on final agent errors and failed context compactions.
 - Notify when a running agent is waiting for user input, including `rpiv-ask-user-question` prompts.

@@ -52,4 +52,6 @@ notify_user({
 
 The Telegram title is the current working folder name. Notification bodies support Markdown and are rendered as Telegram HTML. Finish notifications include the full last assistant response; a recap is generated only when the message exceeds Telegram's 4096-character limit. If a `notify_user` message is too long, the optional `title` remains the first body line while the body is recapped or truncated to fit. Error and input alerts can be toggled with `/notify-events error|input on|off`.
 
+Plannotator plan submissions/revisions and approvals notify automatically via the input toggle; do not send duplicate `notify_user` alerts for these events.
+
 Configure the Telegram bot with `/notify-telegram-setup` before using the tool.

@@ -12,6 +12,7 @@ Telegram notifications for [Pi](https://pi.dev): send urgent messages with `noti
 - `notify_user` tool for critical errors, long-running task completion, and requested alerts.
 - High-priority alerts for final agent errors and failed context compactions.
 - Alerts when a running agent needs user input, including rich `ask_user_question` prompts.
+- Plannotator plan submit/revision and approval alerts, sharing the input-notification toggle.
 - One Telegram message after a settled agent run, with the full assistant response when it fits Telegram's limit.
 - Automatic recap only when a message exceeds Telegram's 4096-character limit.
 - Automatic chat-ID detection during setup.
@@ -82,7 +83,7 @@ An empty `recap.model` uses the current session model. Set it to `provider/model
 /notify-recap off
 ```
 
-Toggle error or user-input alerts with:
+Toggle error or user-input alerts (including Plannotator plan alerts) with:
 
 ```text
 /notify-events error off
@@ -90,6 +91,16 @@ Toggle error or user-input alerts with:
 ```
 
 Notification bodies accept Markdown (`**bold**`, lists, code blocks, and links); it is converted to Telegram's supported HTML format.
+
+## Plannotator plan notifications
+
+With `@plannotator/pi-extension` loaded, `plannotator_submit_plan` sends **📝 Plan ready for review** with the plan path, review URL and review ID. Revisions pushed into an open review also include the version when available. No plan contents are sent. The title is the working folder name; the body includes the session name when available.
+
+A ready-for-review alert replaces the normal finish notification for that run; error alerts are never suppressed. When the tracked review closes with approval, a silent **✅ Plan approved** message is sent. Completion notifications resume normally for the implementation run.
+
+Both alerts use `input.enabled` and `/notify-events input on|off`. Disabling input alerts leaves normal finish notifications unchanged. Subagent processes, unchanged plans, failed submits, automatic approval without a review UI, and code-review/annotation events do not produce plan alerts.
+
+This integration uses Plannotator's `plannotator:session-opened` / `plannotator:session-closed` event bus (checked against 0.28.65); no Plannotator dependency is added. Only reviews observed in the current runtime are tracked; `/reload` clears that state. Review URLs are sent as advertised by Plannotator: a localhost URL works only on the machine hosting the review, not directly from your phone.
 
 ## `notify_user`
 

@@ -164,6 +164,81 @@ test("finish notification uses lifecycle text when no assistant message exists",
   });
 });
 
+test("skipCurrentRun suppresses completion and resets on agent_start", async () => {
+  const sent = [];
+  const notifier = createFinishNotifier(notifierContext("ignored", null), {
+    getConfig: () => config(), env: {}, graceMs: 0,
+    dispatch: async (request) => { sent.push(request); return { configured: true, sent: true }; },
+  });
+  notifier.onAgentStart();
+  notifier.skipCurrentRun();
+  notifier.onAgentSettled();
+  await wait(15);
+  assert.equal(sent.length, 0);
+  notifier.onAgentStart();
+  notifier.onAgentSettled();
+  await wait(15);
+  assert.equal(sent.length, 1);
+  assert.match(sent[0].message, /Agent is complete/);
+  notifier.dispose();
+});
+
+test("skipCurrentRun also suppresses an already scheduled completion", async () => {
+  const sent = [];
+  const notifier = createFinishNotifier(notifierContext("ignored"), {
+    getConfig: () => config(), env: {}, graceMs: 0,
+    dispatch: async (request) => { sent.push(request); return { configured: true, sent: true }; },
+  });
+  notifier.onAgentSettled();
+  notifier.skipCurrentRun();
+  await wait(15);
+  assert.equal(sent.length, 0);
+  notifier.dispose();
+});
+
+test("skipCurrentRun rechecks suppression after a slow recap", async () => {
+  const sent = [];
+  let resolveSummary;
+  let recapStarted;
+  const started = new Promise((resolve) => { recapStarted = resolve; });
+  const ctx = notifierContext("ignored", "x".repeat(4100));
+  ctx.modelRegistry.streamSimple = () => ({
+    result: () => new Promise((resolve) => { resolveSummary = resolve; recapStarted(); }),
+  });
+  const notifier = createFinishNotifier(ctx, {
+    getConfig: () => config({ recap: { enabled: true } }), env: {}, graceMs: 0,
+    dispatch: async (request) => { sent.push(request); return { configured: true, sent: true }; },
+  });
+  notifier.onAgentSettled();
+  await Promise.all([started, wait(15)]);
+  notifier.skipCurrentRun();
+  resolveSummary({ role: "assistant", content: "summary" });
+  await wait(15);
+  assert.equal(sent.length, 0);
+  notifier.dispose();
+});
+
+test("skipCurrentRun never suppresses enabled errors from lifecycle or assistant", async () => {
+  for (const source of ["outcome", "assistant"]) {
+    const sent = [];
+    const ctx = notifierContext("ignored", "partial", source === "assistant"
+      ? { stopReason: "error", errorMessage: "Provider failed" } : {});
+    const notifier = createFinishNotifier(ctx, {
+      getConfig: () => config({ finish: { enabled: false } }), env: {}, graceMs: 0,
+      dispatch: async (request) => { sent.push(request); return { configured: true, sent: true }; },
+    });
+    notifier.onAgentStart();
+    notifier.skipCurrentRun();
+    if (source === "outcome") notifier.onBeforeSettle({ outcome: "error" });
+    notifier.onAgentSettled();
+    await wait(15);
+    assert.equal(sent.length, 1);
+    assert.equal(sent[0].priority, "high");
+    assert.match(sent[0].message, /Error/);
+    notifier.dispose();
+  }
+});
+
 test("disabled finish and child processes do not notify", async () => {
   const sent = [];
   const disabled = createFinishNotifier(notifierContext("summary"), {

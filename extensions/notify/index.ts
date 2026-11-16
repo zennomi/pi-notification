@@ -17,6 +17,12 @@ import {
   createInputNotifier,
   type InputNotifier,
 } from "../../lib/notify/input.ts";
+import {
+  PLANNOTATOR_SESSION_OPENED_CHANNEL,
+  PLANNOTATOR_SESSION_CLOSED_CHANNEL,
+  createPlanReviewNotifier,
+  type PlanReviewNotifier,
+} from "../../lib/notify/plan.ts";
 import { fitTelegramBody } from "../../lib/notify/recap.ts";
 import { pollForChatId } from "../../lib/notify/telegram.ts";
 
@@ -36,6 +42,7 @@ const POLL_TIMEOUT_MS = 5 * 60 * 1000;
 let sessionContext: ExtensionContext | undefined;
 let finishNotifier: FinishNotifier | undefined;
 let inputNotifier: InputNotifier | undefined;
+let planNotifier: PlanReviewNotifier | undefined;
 let eventUnsubscribers: Array<() => void> = [];
 
 function disposeEventSubscriptions(): void {
@@ -175,6 +182,7 @@ export default function (pi: ExtensionAPI): void {
     sessionContext = ctx;
     finishNotifier?.dispose();
     inputNotifier?.dispose();
+    planNotifier?.dispose();
     disposeEventSubscriptions();
     finishNotifier = createFinishNotifier(ctx, {
       getConfig: loadConfig,
@@ -184,15 +192,27 @@ export default function (pi: ExtensionAPI): void {
       getConfig: loadConfig,
       getSessionName: () => pi.getSessionName?.(),
     });
+    planNotifier = createPlanReviewNotifier(ctx, {
+      getConfig: loadConfig,
+      getSessionName: () => pi.getSessionName?.(),
+      onPlanNotified: () => finishNotifier?.skipCurrentRun(),
+    });
     eventUnsubscribers = [
       pi.events.on(ASK_USER_PROMPT_CHANNEL, (payload) => inputNotifier?.onAskUserPrompt(payload)),
       pi.events.on(ASK_USER_BLOCKED_CHANNEL, (payload) => inputNotifier?.onAskUserBlocked(payload)),
+      pi.events.on(PLANNOTATOR_SESSION_OPENED_CHANNEL, (payload) => planNotifier?.onSessionOpened(payload)),
+      pi.events.on(PLANNOTATOR_SESSION_CLOSED_CHANNEL, (payload) => planNotifier?.onSessionClosed(payload)),
     ];
   });
 
   pi.on("agent_start", async () => {
     finishNotifier?.onAgentStart();
     inputNotifier?.onAgentStart();
+    planNotifier?.onAgentStart();
+  });
+
+  pi.on("tool_result", (event) => {
+    planNotifier?.onToolResult(event);
   });
 
   pi.on("agent_before_settle", async (event) => {
@@ -221,8 +241,10 @@ export default function (pi: ExtensionAPI): void {
     disposeEventSubscriptions();
     finishNotifier?.dispose();
     inputNotifier?.dispose();
+    planNotifier?.dispose();
     finishNotifier = undefined;
     inputNotifier = undefined;
+    planNotifier = undefined;
     sessionContext = undefined;
   });
 }
