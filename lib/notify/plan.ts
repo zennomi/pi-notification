@@ -1,16 +1,16 @@
-import { basename } from "node:path";
 import type { ExtensionContext, ToolResultEvent } from "@earendil-works/pi-coding-agent";
 import type { NotifyPriority } from "./config.ts";
 import { dispatchNotification } from "./dispatch.ts";
-import { isChildProcess } from "./finish.ts";
-import type { InputNotifierDeps } from "./input.ts";
+import { heading } from "./message.ts";
+import { isRecord, text } from "./payload.ts";
+import { folderTitle, isChildProcess, type SessionNotifierDeps } from "./session.ts";
 import { fitTelegramBody } from "./recap.ts";
 
 export const PLANNOTATOR_SESSION_OPENED_CHANNEL = "plannotator:session-opened";
 export const PLANNOTATOR_SESSION_CLOSED_CHANNEL = "plannotator:session-closed";
 export const PLAN_SUBMIT_TOOL = "plannotator_submit_plan";
 
-export interface PlanReviewNotifierDeps extends InputNotifierDeps {
+export interface PlanReviewNotifierDeps extends SessionNotifierDeps {
   onPlanNotified?: () => void;
   env?: NodeJS.ProcessEnv;
 }
@@ -31,13 +31,7 @@ interface OpenReview {
 }
 
 function record(value: unknown): Record<string, unknown> {
-  return typeof value === "object" && value !== null && !Array.isArray(value)
-    ? value as Record<string, unknown>
-    : {};
-}
-
-function text(value: unknown): string {
-  return typeof value === "string" ? value : "";
+  return isRecord(value) ? value : {};
 }
 
 function inlineCode(value: string): string {
@@ -76,7 +70,8 @@ export function createPlanReviewNotifier(
     openedThisCall = false;
   };
 
-  const belongsToSession = (payload: Record<string, unknown>): boolean => {
+  const isSessionReview = (payload: Record<string, unknown>): boolean => {
+    if (payload.action !== "plan-review") return false;
     const sessionId = text(payload.piSessionId);
     return !sessionId || sessionId === ctx.sessionManager.getSessionId();
   };
@@ -85,10 +80,10 @@ export function createPlanReviewNotifier(
     if (disposed || child) return;
     const config = deps.getConfig();
     if (config.input?.enabled === false) return;
-    const title = deps.getFolderName?.() ?? basename(ctx.cwd || process.cwd());
+    const title = folderTitle(ctx, deps);
     // Suppress completion before awaiting formatting/transport, not after a slow send.
     if (ready) deps.onPlanNotified?.();
-    void fitTelegramBody({ title, prefix: "", text: body, ctx, recap: config.recap })
+    void fitTelegramBody({ title, text: body, ctx, recap: config.recap })
       .then((message) => {
         if (!disposed) return dispatch({ title, message, priority }, config);
       }).catch(() => {
@@ -96,19 +91,15 @@ export function createPlanReviewNotifier(
       });
   };
 
-  const heading = (label: string): string => {
-    const name = deps.getSessionName?.();
-    return `**${label}**${name ? ` — ${name}` : ""}`;
-  };
-
-  const notifyReady = (review: OpenReview, version?: unknown): void => {
+  const notifyReady = (review: OpenReview, filePath: string, version?: unknown): void => {
+    review.filePath = filePath;
     review.notified = true;
     const suffix = typeof version === "number" && Number.isSafeInteger(version) && version > 0
       ? ` (v${version})` : "";
     send([
-      heading("📝 Plan ready for review"),
+      heading("📝 Plan ready for review", deps.getSessionName?.()),
       "",
-      `File: ${inlineCode(review.filePath!)}${suffix}`,
+      `File: ${inlineCode(filePath)}${suffix}`,
       `Review: <${review.url}> (id ${inlineCode(review.id)})`,
     ].join("\n"), "normal", true);
   };
@@ -122,7 +113,7 @@ export function createPlanReviewNotifier(
     onSessionOpened(payload) {
       if (disposed || child) return;
       const data = record(payload);
-      if (data.action !== "plan-review" || !belongsToSession(data)) return;
+      if (!isSessionReview(data)) return;
       const id = text(data.id);
       const url = reviewUrl(data.url);
       if (!id || !url || openReview?.id === id) return;
@@ -142,10 +133,7 @@ export function createPlanReviewNotifier(
       }
       if (details.revised === true) {
         openedThisCall = false;
-        if (openReview) {
-          openReview.filePath = filePath;
-          notifyReady(openReview, details.version);
-        }
+        if (openReview) notifyReady(openReview, filePath, details.version);
         return;
       }
 
@@ -159,8 +147,7 @@ export function createPlanReviewNotifier(
         if (disposed || !openedThisCall || !openReview || openReview.notified) return;
         if (reviewAtResult && reviewAtResult !== openReview) return;
         openedThisCall = false;
-        openReview.filePath = filePath;
-        notifyReady(openReview);
+        notifyReady(openReview, filePath);
       }, 0);
       timers.add(timer);
       timer.unref?.();
@@ -168,14 +155,13 @@ export function createPlanReviewNotifier(
     onSessionClosed(payload) {
       if (disposed || child) return;
       const data = record(payload);
-      if (data.action !== "plan-review" || !belongsToSession(data)
-        || !openReview || data.id !== openReview.id) return;
+      if (!isSessionReview(data) || !openReview || data.id !== openReview.id) return;
       const review = openReview;
       openReview = undefined;
       openedThisCall = false;
       if (data.outcome === "approved") {
         const file = review.filePath ? `\n\nFile: ${inlineCode(review.filePath)}` : "";
-        send(`${heading("✅ Plan approved")}${file}`, "low");
+        send(`${heading("✅ Plan approved", deps.getSessionName?.())}${file}`, "low");
       }
     },
     dispose() {

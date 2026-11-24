@@ -5,20 +5,9 @@ import { join } from "node:path";
 import test from "node:test";
 import notifyExtension from "../extensions/notify/index.ts";
 import { createFinishNotifier } from "../lib/notify/finish.ts";
-import {
-  createPlanReviewNotifier,
-  PLAN_SUBMIT_TOOL,
-  PLANNOTATOR_SESSION_CLOSED_CHANNEL,
-  PLANNOTATOR_SESSION_OPENED_CHANNEL,
-} from "../lib/notify/plan.ts";
+import { createPlanReviewNotifier } from "../lib/notify/plan.ts";
+import { notificationConfig as config, recordNotifications } from "./fixtures/notifications.mjs";
 
-const config = () => ({
-  telegram: { enabled: true, botToken: "token", chatId: "chat" },
-  finish: { enabled: true },
-  recap: { enabled: false, model: "" },
-  error: { enabled: true },
-  input: { enabled: true },
-});
 const context = () => ({
   cwd: "/tmp/pi-notification",
   model: undefined,
@@ -33,7 +22,7 @@ const closed = (outcome = "approved", overrides = {}) => ({
   ...opened(), outcome, closedAt: 200, ...overrides,
 });
 const result = (overrides = {}) => ({
-  type: "tool_result", toolName: PLAN_SUBMIT_TOOL, toolCallId: "call-1",
+  type: "tool_result", toolName: "plannotator_submit_plan", toolCallId: "call-1",
   input: { filePath: "PLAN.md" }, isError: false, content: [],
   details: { approved: false, pending: true }, ...overrides,
 });
@@ -47,7 +36,7 @@ function setup(t, overrides = {}) {
     getSessionName: () => "Demo",
     env: {},
     onPlanNotified: () => { suppressed += 1; },
-    dispatch: async (request) => { sent.push(request); return { configured: true, sent: true }; },
+    dispatch: recordNotifications(sent),
     ...overrides,
   });
   t.after(() => notifier.dispose());
@@ -192,7 +181,7 @@ test("review can reopen after feedback and notify again", async (t) => {
 
 test("input toggle and child-process flags disable both messages and finish suppression", async (t) => {
   const overrides = [
-    { getConfig: () => ({ ...config(), input: { enabled: false } }) },
+    { getConfig: () => config({ input: { enabled: false } }) },
     ...["PI_SUBAGENT_CHILD", "PI_FUSION_CHILD", "UNIPI_SUBAGENT_CHILD", "UNIPI_FUSION_CHILD"]
       .map((flag) => ({ env: { [flag]: "1" } })),
   ];
@@ -256,7 +245,7 @@ test("transport failures are swallowed without holding the tool_result hook open
 
 test("plan notification suppresses completion even with zero finish grace", async (t) => {
   const sent = [];
-  const dispatch = async (request) => { sent.push(request); return { configured: true, sent: true }; };
+  const dispatch = recordNotifications(sent);
   const finish = createFinishNotifier(context(), { getConfig: config, env: {}, graceMs: 0, dispatch });
   t.after(() => finish.dispose());
   const { notifier } = setup(t, { dispatch, onPlanNotified: () => finish.skipCurrentRun() });
@@ -317,7 +306,9 @@ test("extension wires plan hooks, preserves tool results and cleans up subscript
   const emit = (name, payload) => { for (const handler of bus.get(name) ?? []) handler(payload); };
   await handlers.get("session_start")({}, context());
   await handlers.get("agent_start")();
-  emit(PLANNOTATOR_SESSION_OPENED_CHANNEL, opened());
+  const openedChannel = "plannotator:session-opened";
+  const closedChannel = "plannotator:session-closed";
+  emit(openedChannel, opened());
   const event = result();
   const before = structuredClone(event);
   assert.equal(await handlers.get("tool_result")(event), undefined);
@@ -326,16 +317,16 @@ test("extension wires plan hooks, preserves tool results and cleans up subscript
   await wait();
   assert.equal(sent.length, 1);
   assert.match(sent[0].text, /Plan ready for review/);
-  emit(PLANNOTATOR_SESSION_CLOSED_CHANNEL, closed());
+  emit(closedChannel, closed());
   await wait();
   assert.equal(sent.length, 2);
   assert.match(sent[1].text, /Plan approved/);
   await handlers.get("session_start")({}, context());
-  assert.equal(bus.get(PLANNOTATOR_SESSION_OPENED_CHANNEL).size, 1);
-  assert.equal(bus.get(PLANNOTATOR_SESSION_CLOSED_CHANNEL).size, 1);
+  assert.equal(bus.get(openedChannel).size, 1);
+  assert.equal(bus.get(closedChannel).size, 1);
   await handlers.get("session_shutdown")();
   assert.ok([...bus.values()].every((listeners) => listeners.size === 0));
-  emit(PLANNOTATOR_SESSION_OPENED_CHANNEL, opened());
+  emit(openedChannel, opened());
   await handlers.get("tool_result")(result());
   await wait();
   assert.equal(sent.length, 2);

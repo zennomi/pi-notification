@@ -2,6 +2,10 @@ import { existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { getAgentDir } from "@earendil-works/pi-coding-agent";
 
+import { isRecord } from "./payload.ts";
+
+const CONFIG_FILENAME = "notify.json";
+
 export interface TelegramConfig {
   enabled: boolean;
   botToken?: string;
@@ -16,15 +20,12 @@ export interface NotifyConfig {
   input: { enabled: boolean };
 }
 
-export type NotifyPriority = "low" | "normal" | "high";
+export const NOTIFY_PRIORITIES = ["low", "normal", "high"] as const;
+export type NotifyPriority = typeof NOTIFY_PRIORITIES[number];
 
-export interface NotifyConfigPatch {
-  telegram?: Partial<TelegramConfig>;
-  finish?: Partial<NotifyConfig["finish"]>;
-  recap?: Partial<NotifyConfig["recap"]>;
-  error?: Partial<NotifyConfig["error"]>;
-  input?: Partial<NotifyConfig["input"]>;
-}
+export type NotifyConfigPatch = {
+  [K in keyof NotifyConfig]?: Partial<NotifyConfig[K]>;
+};
 
 export const DEFAULT_CONFIG: NotifyConfig = {
   telegram: { enabled: false },
@@ -35,11 +36,11 @@ export const DEFAULT_CONFIG: NotifyConfig = {
 };
 
 export function globalConfigPath(agentDir = getAgentDir()): string {
-  return join(agentDir, "notify.json");
+  return join(agentDir, CONFIG_FILENAME);
 }
 
 export function projectConfigPath(cwd = process.cwd()): string {
-  return join(cwd, ".pi", "notify.json");
+  return join(cwd, ".pi", CONFIG_FILENAME);
 }
 
 function readPartial(path: string): NotifyConfigPatch {
@@ -52,39 +53,23 @@ function readPartial(path: string): NotifyConfigPatch {
   }
 }
 
-function isRecord(value: unknown): value is Record<string, unknown> {
-  return typeof value === "object" && value !== null && !Array.isArray(value);
-}
-
 function mergeConfig(...parts: NotifyConfigPatch[]): NotifyConfig {
-  const telegram: TelegramConfig = { ...DEFAULT_CONFIG.telegram };
-  const finish = { ...DEFAULT_CONFIG.finish };
-  const recap = { ...DEFAULT_CONFIG.recap };
-  const error = { ...DEFAULT_CONFIG.error };
-  const input = { ...DEFAULT_CONFIG.input };
-
+  const config = structuredClone(DEFAULT_CONFIG);
+  const sections = Object.keys(config) as (keyof NotifyConfig)[];
   for (const part of parts) {
+    for (const key of sections) {
+      const section = part[key];
+      if (isRecord(section) && typeof section.enabled === "boolean") {
+        config[key].enabled = section.enabled;
+      }
+    }
     if (isRecord(part.telegram)) {
-      if (typeof part.telegram.enabled === "boolean") telegram.enabled = part.telegram.enabled;
-      if (typeof part.telegram.botToken === "string") telegram.botToken = part.telegram.botToken;
-      if (typeof part.telegram.chatId === "string") telegram.chatId = part.telegram.chatId;
+      if (typeof part.telegram.botToken === "string") config.telegram.botToken = part.telegram.botToken;
+      if (typeof part.telegram.chatId === "string") config.telegram.chatId = part.telegram.chatId;
     }
-    if (isRecord(part.finish) && typeof part.finish.enabled === "boolean") {
-      finish.enabled = part.finish.enabled;
-    }
-    if (isRecord(part.recap)) {
-      if (typeof part.recap.enabled === "boolean") recap.enabled = part.recap.enabled;
-      if (typeof part.recap.model === "string") recap.model = part.recap.model;
-    }
-    if (isRecord(part.error) && typeof part.error.enabled === "boolean") {
-      error.enabled = part.error.enabled;
-    }
-    if (isRecord(part.input) && typeof part.input.enabled === "boolean") {
-      input.enabled = part.input.enabled;
-    }
+    if (isRecord(part.recap) && typeof part.recap.model === "string") config.recap.model = part.recap.model;
   }
-
-  return { telegram, finish, recap, error, input };
+  return config;
 }
 
 /** Load defaults, global config, project config, then environment overrides. */

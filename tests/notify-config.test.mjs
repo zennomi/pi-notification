@@ -1,5 +1,5 @@
 import assert from "node:assert/strict";
-import { mkdtempSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
+import { mkdtempSync, mkdirSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import test from "node:test";
@@ -12,8 +12,10 @@ import {
   saveGlobalConfig,
 } from "../lib/notify/config.ts";
 
-function tempDir() {
-  return mkdtempSync(join(tmpdir(), "pi-notify-config-"));
+function tempDir(t) {
+  const path = mkdtempSync(join(tmpdir(), "pi-notify-config-"));
+  t.after(() => rmSync(path, { recursive: true, force: true }));
+  return path;
 }
 
 function withAgentDir(agentDir, fn) {
@@ -38,9 +40,9 @@ test("config defaults are disabled for Telegram and enabled for notifications", 
   assert.equal(isTelegramConfigured(DEFAULT_CONFIG), false);
 });
 
-test("config merges global, project, and environment overrides", () => {
-  const agentDir = tempDir();
-  const cwd = tempDir();
+test("config merges global, project, and environment overrides", (t) => {
+  const agentDir = tempDir(t);
+  const cwd = tempDir(t);
   mkdirSync(join(cwd, ".pi"), { recursive: true });
   writeFileSync(globalConfigPath(agentDir), JSON.stringify({
     telegram: { enabled: true, botToken: "global-token", chatId: "global-chat" },
@@ -64,31 +66,34 @@ test("config merges global, project, and environment overrides", () => {
   assert.equal(isTelegramConfigured(config), true);
 });
 
-test("config patches can disable error and input notifications", () => {
-  const agentDir = tempDir();
+test("config patches can disable error and input notifications", (t) => {
+  const agentDir = tempDir(t);
   const saved = saveGlobalConfig({ error: { enabled: false }, input: { enabled: false } }, agentDir);
   assert.equal(saved.error.enabled, false);
   assert.equal(saved.input.enabled, false);
 });
 
-test("saveGlobalConfig writes only the global file", () => {
-  const agentDir = tempDir();
-  const cwd = tempDir();
+test("saveGlobalConfig writes only the global file", (t) => {
+  const agentDir = tempDir(t);
+  const cwd = tempDir(t);
   mkdirSync(join(cwd, ".pi"), { recursive: true });
   writeFileSync(projectConfigPath(cwd), JSON.stringify({ recap: { enabled: false } }));
 
-  const saved = saveGlobalConfig({
-    telegram: { enabled: true, botToken: "token", chatId: "chat" },
-  }, agentDir);
-
-  assert.equal(saved.telegram.botToken, "token");
-  assert.equal(readFileSync(globalConfigPath(agentDir), "utf8").includes("token"), true);
+  const previousCwd = process.cwd();
+  try {
+    process.chdir(cwd);
+    const saved = saveGlobalConfig({ telegram: { enabled: true, botToken: "token", chatId: "chat" } }, agentDir);
+    assert.equal(saved.telegram.botToken, "token");
+  } finally {
+    process.chdir(previousCwd);
+  }
+  assert.equal(JSON.parse(readFileSync(globalConfigPath(agentDir), "utf8")).telegram.botToken, "token");
   assert.deepEqual(JSON.parse(readFileSync(projectConfigPath(cwd), "utf8")), { recap: { enabled: false } });
 });
 
-test("invalid JSON is ignored and returns safe defaults", () => {
-  const agentDir = tempDir();
-  const cwd = tempDir();
+test("invalid JSON is ignored and returns safe defaults", (t) => {
+  const agentDir = tempDir(t);
+  const cwd = tempDir(t);
   mkdirSync(join(cwd, ".pi"), { recursive: true });
   writeFileSync(globalConfigPath(agentDir), "not-json");
   writeFileSync(projectConfigPath(cwd), "[]");

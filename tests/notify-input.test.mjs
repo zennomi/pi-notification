@@ -1,14 +1,7 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 import { createInputNotifier } from "../lib/notify/input.ts";
-
-const config = (overrides = {}) => ({
-  telegram: { enabled: true, botToken: "token", chatId: "chat" },
-  finish: { enabled: true },
-  recap: { enabled: false, model: "" },
-  error: { enabled: true },
-  input: { enabled: true, ...overrides.input },
-});
+import { notificationConfig, recordNotifications } from "./fixtures/notifications.mjs";
 
 function context() {
   return {
@@ -20,10 +13,9 @@ function context() {
 
 function makeNotifier(sent, overrides = {}) {
   return createInputNotifier(context(), {
-    getConfig: () => config(overrides),
+    getConfig: () => notificationConfig(overrides),
     getSessionName: () => "Demo",
-    getFolderName: () => "pi-notification",
-    dispatch: async (request) => { sent.push(request); return { configured: true, sent: true }; },
+    dispatch: recordNotifications(sent),
   });
 }
 

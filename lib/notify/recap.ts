@@ -1,5 +1,6 @@
 import type { ExtensionContext } from "@earendil-works/pi-coding-agent";
-import type { AssistantMessage, Context, Model } from "@earendil-works/pi-ai";
+import type { Context, Model } from "@earendil-works/pi-ai";
+import type { NotifyConfig } from "./config.ts";
 import {
   TELEGRAM_MAX_MESSAGE_CHARS,
   telegramTextLength,
@@ -73,10 +74,6 @@ export function extractLastAssistantTextFromSession(ctx: Pick<ExtensionContext, 
   return message ? extractAssistantContent(message) : null;
 }
 
-function assistantText(result: AssistantMessage): string | null {
-  return extractAssistantContent(result);
-}
-
 function resolveModel(
   ctx: Pick<ExtensionContext, "model" | "modelRegistry">,
   modelRef: string,
@@ -118,7 +115,7 @@ export async function tryRecap(
       timeout.unref?.();
     });
     const result = await Promise.race([stream.result(), timeoutPromise]);
-    const summary = assistantText(result)?.trim();
+    const summary = extractAssistantContent(result)?.trim();
     return summary || null;
   } catch {
     return null;
@@ -136,30 +133,31 @@ export function truncateToLength(text: string, max: number): string {
 
 export interface FitTelegramBodyOptions {
   title: string;
-  prefix: string;
+  prefix?: string;
   text: string;
   ctx?: Pick<ExtensionContext, "model" | "modelRegistry">;
-  recap: { enabled: boolean; model: string };
+  recap: NotifyConfig["recap"];
   limit?: number;
 }
 
 export async function fitTelegramBody({
   title,
-  prefix,
+  prefix = "",
   text,
   ctx,
   recap,
   limit = TELEGRAM_MAX_MESSAGE_CHARS,
 }: FitTelegramBodyOptions): Promise<string> {
   let body = `${prefix}${text}`;
-  if (telegramTextLength(title, body) <= limit) return body;
+  const bodyBudget = limit - telegramTextLength(title, "");
+  if (body.length <= bodyBudget) return body;
 
   if (recap.enabled && ctx) {
     const summary = await tryRecap(text, ctx, recap.model);
     if (summary) body = `${prefix}${summary}`;
   }
 
-  return truncateToLength(body, Math.max(0, limit - title.length - 1));
+  return truncateToLength(body, bodyBudget);
 }
 
 /** Summarize text with Pi's configured model runtime, falling back safely. */

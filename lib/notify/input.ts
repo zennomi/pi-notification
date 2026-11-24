@@ -1,7 +1,8 @@
-import { basename } from "node:path";
 import type { ExtensionContext } from "@earendil-works/pi-coding-agent";
-import type { NotifyConfig } from "./config.ts";
-import { dispatchNotification, type DispatchResult, type NotificationRequest } from "./dispatch.ts";
+import { dispatchNotification } from "./dispatch.ts";
+import { heading } from "./message.ts";
+import { text } from "./payload.ts";
+import { folderTitle, type SessionNotifierDeps } from "./session.ts";
 import { fitTelegramBody } from "./recap.ts";
 
 export const ASK_USER_PROMPT_CHANNEL = "rpiv:ask-user:prompt";
@@ -24,12 +25,7 @@ interface AskUserPromptPayload {
   toolCallId?: unknown;
 }
 
-export interface InputNotifierDeps {
-  getConfig: () => NotifyConfig;
-  getSessionName?: () => string | undefined;
-  getFolderName?: () => string;
-  dispatch?: (request: NotificationRequest, config: NotifyConfig) => Promise<DispatchResult>;
-}
+export type InputNotifierDeps = SessionNotifierDeps;
 
 export interface InputNotifier {
   onAgentStart(): void;
@@ -40,13 +36,13 @@ export interface InputNotifier {
   dispose(): void;
 }
 
-function text(value: unknown): string {
-  return typeof value === "string" ? value : "";
+function askUserKey(toolCallId: unknown): string {
+  return text(toolCallId) || "__rpiv-ask-user-anonymous__";
 }
 
 function formatAskUserPrompt(payload: AskUserPromptPayload, sessionName?: string): string {
   const questions = Array.isArray(payload.questions) ? payload.questions as AskUserQuestion[] : [];
-  const lines = [`**❓ Input needed**${sessionName ? ` — ${sessionName}` : ""}`];
+  const lines = [heading("❓ Input needed", sessionName)];
   questions.forEach((question, questionIndex) => {
     const header = text(question.header) || `Question ${questionIndex + 1}`;
     const questionText = text(question.question);
@@ -71,19 +67,16 @@ export function createInputNotifier(
   const activeAsk = new Set<string>();
   const dispatch = deps.dispatch ?? dispatchNotification;
 
-  const title = (): string => deps.getFolderName?.() ?? basename(ctx.cwd || process.cwd());
-
   const send = (body: string): void => {
     const config = deps.getConfig();
     if (config.input?.enabled === false) return;
     void fitTelegramBody({
-      title: title(),
-      prefix: "",
+      title: folderTitle(ctx, deps),
       text: body,
       ctx,
       recap: config.recap,
     }).then((message) => dispatch({
-      title: title(),
+      title: folderTitle(ctx, deps),
       message,
       priority: "normal",
     }, config)).catch(() => {
@@ -101,21 +94,20 @@ export function createInputNotifier(
     },
     onAskUserPrompt(payload) {
       const data = (payload ?? {}) as AskUserPromptPayload;
-      const toolCallId = text(data.toolCallId) || "__rpiv-ask-user-anonymous__";
-      activeAsk.add(toolCallId);
+      activeAsk.add(askUserKey(data.toolCallId));
       send(formatAskUserPrompt(data, deps.getSessionName?.()));
     },
     onAskUserBlocked(payload) {
       const data = payload as { active?: unknown; toolCallId?: unknown };
       if (data.active === false) {
-        activeAsk.delete(text(data.toolCallId) || "__rpiv-ask-user-anonymous__");
+        activeAsk.delete(askUserKey(data.toolCallId));
       }
     },
     onUiPromptStart(payload) {
       if (!running || activeAsk.size > 0) return;
       const kind = text(payload.kind) || "custom";
       const promptTitle = text(payload.title);
-      const body = `**⏳ Waiting for input**${promptTitle ? ` — ${promptTitle}` : ""}\n\nPrompt type: \`${kind}\``;
+      const body = `${heading("⏳ Waiting for input", promptTitle)}\n\nPrompt type: \`${kind}\``;
       send(body);
     },
     dispose() {

@@ -1,8 +1,8 @@
 import type { ExtensionContext } from "@earendil-works/pi-coding-agent";
-import type { NotifyConfig } from "./config.ts";
-import { dispatchNotification, type DispatchResult, type NotificationRequest } from "./dispatch.ts";
+import { dispatchNotification } from "./dispatch.ts";
+import { fencedError, heading } from "./message.ts";
 import { fitTelegramBody } from "./recap.ts";
-import { isChildProcess } from "./finish.ts";
+import { isChildProcess, type NotifierDeps } from "./session.ts";
 
 export interface CompactionFailedEvent {
   reason: string;
@@ -11,12 +11,9 @@ export interface CompactionFailedEvent {
   willRetry?: boolean;
 }
 
-export interface CompactionNotifierDeps {
-  getConfig: () => NotifyConfig;
+export interface CompactionNotifierDeps extends NotifierDeps {
   title: string;
-  getSessionName?: () => string | undefined;
   ctx?: Pick<ExtensionContext, "model" | "modelRegistry">;
-  dispatch?: (request: NotificationRequest, config: NotifyConfig) => Promise<DispatchResult>;
   env?: NodeJS.ProcessEnv;
 }
 
@@ -31,12 +28,11 @@ export async function notifyCompactionFailed(
 
   const sessionName = deps.getSessionName?.();
   const body = [
-    `**❌ Compaction failed**${sessionName ? ` — ${sessionName}` : ""} (${event.reason})`,
-    "```\n" + event.errorMessage.replaceAll("```", "``\u200b`") + "\n```",
+    `${heading("❌ Compaction failed", sessionName)} (${event.reason})`,
+    fencedError(event.errorMessage),
   ].join("\n\n");
   const message = await fitTelegramBody({
     title: deps.title,
-    prefix: "",
     text: body,
     ctx: deps.ctx,
     recap: config.recap,

@@ -1,21 +1,15 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 import { notifyCompactionFailed } from "../lib/notify/errors.ts";
-
-const config = (overrides = {}) => ({
-  telegram: { enabled: true, botToken: "token", chatId: "chat" },
-  finish: { enabled: true },
-  recap: { enabled: false, model: "" },
-  error: { enabled: true, ...overrides.error },
-  input: { enabled: true },
-});
+import { notificationConfig, recordNotifications } from "./fixtures/notifications.mjs";
 
 function deps(sent, overrides = {}) {
   return {
     title: "pi-notification",
     getSessionName: () => "Demo",
-    getConfig: () => config(overrides),
-    dispatch: async (request) => { sent.push(request); return { configured: true, sent: true }; },
+    getConfig: () => notificationConfig(overrides),
+    dispatch: recordNotifications(sent),
+    env: {},
   };
 }
 

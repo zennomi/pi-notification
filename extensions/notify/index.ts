@@ -6,7 +6,7 @@ import {
   isTelegramConfigured,
   loadConfig,
   saveGlobalConfig,
-  type NotifyPriority,
+  NOTIFY_PRIORITIES,
 } from "../../lib/notify/config.ts";
 import { dispatchNotification, SETUP_HINT } from "../../lib/notify/dispatch.ts";
 import { notifyCompactionFailed } from "../../lib/notify/errors.ts";
@@ -24,6 +24,7 @@ import {
   type PlanReviewNotifier,
 } from "../../lib/notify/plan.ts";
 import { fitTelegramBody } from "../../lib/notify/recap.ts";
+import { folderTitle as sessionFolderTitle } from "../../lib/notify/session.ts";
 import { pollForChatId } from "../../lib/notify/telegram.ts";
 
 const NotifyUserSchema = Type.Object({
@@ -31,7 +32,7 @@ const NotifyUserSchema = Type.Object({
   title: Type.Optional(Type.String({
     description: "Optional heading shown on the first line of the message (Telegram title is the current folder name)",
   })),
-  priority: Type.Optional(StringEnum(["low", "normal", "high"] as const, {
+  priority: Type.Optional(StringEnum(NOTIFY_PRIORITIES, {
     description: "Priority level",
   })),
 });
@@ -44,6 +45,12 @@ let finishNotifier: FinishNotifier | undefined;
 let inputNotifier: InputNotifier | undefined;
 let planNotifier: PlanReviewNotifier | undefined;
 let eventUnsubscribers: Array<() => void> = [];
+
+function disposeNotifiers(): void {
+  finishNotifier?.dispose();
+  inputNotifier?.dispose();
+  planNotifier?.dispose();
+}
 
 function disposeEventSubscriptions(): void {
   for (const unsubscribe of eventUnsubscribers) unsubscribe();
@@ -65,6 +72,11 @@ async function waitForChatId(token: string, signal: AbortSignal | undefined): Pr
 }
 
 export default function (pi: ExtensionAPI): void {
+  const notifierDeps = {
+    getConfig: loadConfig,
+    getSessionName: () => pi.getSessionName?.(),
+  };
+
   pi.registerTool({
     name: "notify_user",
     label: "Notify User",
@@ -72,12 +84,7 @@ export default function (pi: ExtensionAPI): void {
       "Send a Telegram notification to the user. Use for critical errors, completion of long-running tasks, "
       + "or when the user explicitly asked to be notified.",
     parameters: NotifyUserSchema,
-    async execute(_toolCallId, params) {
-      const { message, title, priority } = params as {
-        message: string;
-        title?: string;
-        priority?: NotifyPriority;
-      };
+    async execute(_toolCallId, { message, title, priority }) {
       const config = loadConfig();
       if (!isTelegramConfigured(config)) {
         return textResult(SETUP_HINT, { configured: false });
@@ -87,7 +94,6 @@ export default function (pi: ExtensionAPI): void {
       const bodyText = title ? `${title}\n${message}` : message;
       void fitTelegramBody({
         title: folderTitle,
-        prefix: "",
         text: bodyText,
         ctx: sessionContext,
         recap: config.recap,
@@ -158,8 +164,7 @@ export default function (pi: ExtensionAPI): void {
         ctx.ui.notify("Usage: /notify-events <error|input> <on|off>", "warning");
         return;
       }
-      if (kind === "error") saveGlobalConfig({ error: { enabled: value === "on" } });
-      else saveGlobalConfig({ input: { enabled: value === "on" } });
+      saveGlobalConfig({ [kind]: { enabled: value === "on" } });
       ctx.ui.notify(`${kind} notifications are now ${value}.`, "info");
     },
   });
@@ -180,21 +185,12 @@ export default function (pi: ExtensionAPI): void {
 
   pi.on("session_start", async (_event, ctx) => {
     sessionContext = ctx;
-    finishNotifier?.dispose();
-    inputNotifier?.dispose();
-    planNotifier?.dispose();
+    disposeNotifiers();
     disposeEventSubscriptions();
-    finishNotifier = createFinishNotifier(ctx, {
-      getConfig: loadConfig,
-      getSessionName: () => pi.getSessionName?.(),
-    });
-    inputNotifier = createInputNotifier(ctx, {
-      getConfig: loadConfig,
-      getSessionName: () => pi.getSessionName?.(),
-    });
+    finishNotifier = createFinishNotifier(ctx, notifierDeps);
+    inputNotifier = createInputNotifier(ctx, notifierDeps);
     planNotifier = createPlanReviewNotifier(ctx, {
-      getConfig: loadConfig,
-      getSessionName: () => pi.getSessionName?.(),
+      ...notifierDeps,
       onPlanNotified: () => finishNotifier?.skipCurrentRun(),
     });
     eventUnsubscribers = [
@@ -225,9 +221,8 @@ export default function (pi: ExtensionAPI): void {
 
   pi.on("session_compact_failed", async (event, ctx) => {
     await notifyCompactionFailed(event, {
-      getConfig: loadConfig,
-      title: basename(ctx.cwd || process.cwd()),
-      getSessionName: () => pi.getSessionName?.(),
+      ...notifierDeps,
+      title: sessionFolderTitle(ctx),
       ctx,
     });
   });
@@ -239,9 +234,7 @@ export default function (pi: ExtensionAPI): void {
 
   pi.on("session_shutdown", async () => {
     disposeEventSubscriptions();
-    finishNotifier?.dispose();
-    inputNotifier?.dispose();
-    planNotifier?.dispose();
+    disposeNotifiers();
     finishNotifier = undefined;
     inputNotifier = undefined;
     planNotifier = undefined;
